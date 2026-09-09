@@ -303,10 +303,4 @@ async def main() -> None:
 
     asyncio.run(main())
 
-    # Flaskni alohida oqimda ishga tushirish
-    threading.Thread(target=run_flask, daemon=True).start()
-    
-    # BU YERDA ESKI BOTINGIZNI ISHGA TUSHIRISH KODI TURADI
-    # Masalan: dp.run_polling(bot)
-
     
