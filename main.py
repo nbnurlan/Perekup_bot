@@ -300,9 +300,9 @@ async def main() -> None:
     await dp.start_polling(bot, skip_updates=True)
 
 
-if __name__ == "__main__":
+
     asyncio.run(main())
-    if __name__ == "__main__":
+
     # Flaskni alohida oqimda ishga tushirish
     threading.Thread(target=run_flask, daemon=True).start()
     
