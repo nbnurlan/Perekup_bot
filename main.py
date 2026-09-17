@@ -1,17 +1,3 @@
-import os
-import threading
-from flask import Flask
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 7860))
-    app.run(host='0.0.0.0', port=port)
-    
 # ================================================================
 #  main.py — Asosiy fayl
 #  Render.com da ishga tushiriladi.
@@ -26,10 +12,8 @@ import asyncio
 import logging
 import random
 import threading
-import time
 from datetime import datetime
 
-import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
@@ -37,7 +21,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 import config
-from database import cleanup_old_ads, init_db, is_new_ad, save_ad
+from database import cleanup_old_ads, filter_new_ad_ids, init_db, save_ad, save_ads_batch
 from parser import fetch_ads
 
 # ---------------------------------------------------------------
@@ -154,7 +138,6 @@ async def send_ad_notification(ad) -> None:
     )
 
     # --- Inline Keyboard tugmasi ---
-    # url= parametri Telegram da tashqi havolani to'g'ridan ochadi
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔗 E'lonni ochish", url=ad.link)]
     ])
@@ -167,7 +150,7 @@ async def send_ad_notification(ad) -> None:
                 photo        = ad.image,
                 caption      = text,
                 parse_mode   = ParseMode.MARKDOWN,
-                reply_markup = keyboard,          # ← tugma shu yerda
+                reply_markup = keyboard,
             )
         else:
             # Faqat matn + tugma
@@ -175,15 +158,14 @@ async def send_ad_notification(ad) -> None:
                 chat_id                  = config.CHAT_ID,
                 text                     = text,
                 parse_mode               = ParseMode.MARKDOWN,
-                reply_markup             = keyboard,   # ← tugma shu yerda
-                disable_web_page_preview = True,       # URL preview o'chirildi (tugma bor)
+                reply_markup             = keyboard,
+                disable_web_page_preview = True,
             )
 
         logger.info("📨 Xabar yuborildi: %s | %s", ad.id, ad.title[:40])
 
     except Exception as e:
         logger.error("❌ Xabar yuborishda xato (%s): %s", ad.id, e)
-        # Rasm yuborishda xato bo'lsa, rasmsiz yuborishga urinib ko'r
         if ad.image:
             try:
                 await bot.send_message(
@@ -229,25 +211,29 @@ async def monitoring_loop() -> None:
             else:
                 stats["last_error"] = None
 
+                ad_ids = [ad.id for ad in ads]
+
                 if first_run:
                     # Birinchi ishga tushishda barcha e'lonlarni "ko'rilgan" deb belgilash
                     # (Restart bo'lganda eski e'lonlar yana yuborilmasligi uchun)
-                    new_count = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
-                            new_count += 1
+                    # ⚡ Optimizatsiya: Batch so'rov va batch yozish (N+1 xatoligini bartaraf etadi)
+                    new_ad_ids = filter_new_ad_ids(ad_ids)
+                    if new_ad_ids:
+                        save_ads_batch(list(new_ad_ids))
                     logger.info(
                         "🏁 Birinchi ishga tushish: %d e'lon bazaga yozildi "
-                        "(xabar yuborilmadi)", new_count
+                        "(xabar yuborilmadi)", len(new_ad_ids)
                     )
                     first_run = False
 
                 else:
                     # Oddiy tekshiruv: yangilarini topib yuborish
+                    # ⚡ Optimizatsiya: N ta individual SQL so'rovi o'rniga bitta batch query
+                    new_ad_ids = filter_new_ad_ids(ad_ids)
+
                     new_found = 0
                     for ad in ads:
-                        if is_new_ad(ad.id):
+                        if ad.id in new_ad_ids:
                             save_ad(ad.id)
                             await send_ad_notification(ad)
                             stats["new_ads_found"] += 1
@@ -300,7 +286,5 @@ async def main() -> None:
     await dp.start_polling(bot, skip_updates=True)
 
 
-
+if __name__ == "__main__":
     asyncio.run(main())
-
-    
