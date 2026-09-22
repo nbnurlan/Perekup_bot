@@ -37,7 +37,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 import config
-from database import cleanup_old_ads, init_db, is_new_ad, save_ad
+from database import cleanup_old_ads, filter_new_ad_ids, init_db, save_ads
 from parser import fetch_ads
 
 # ---------------------------------------------------------------
@@ -229,26 +229,35 @@ async def monitoring_loop() -> None:
             else:
                 stats["last_error"] = None
 
+                # ⚡ Bolt Optimization: Batch filter unseen ad IDs in a single query
+                ad_map = {ad.id: ad for ad in ads}
+                new_ad_ids = filter_new_ad_ids(list(ad_map.keys()))
+
                 if first_run:
                     # Birinchi ishga tushishda barcha e'lonlarni "ko'rilgan" deb belgilash
                     # (Restart bo'lganda eski e'lonlar yana yuborilmasligi uchun)
-                    new_count = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
-                            new_count += 1
+                    if new_ad_ids:
+                        save_ads(list(new_ad_ids))
                     logger.info(
                         "🏁 Birinchi ishga tushish: %d e'lon bazaga yozildi "
-                        "(xabar yuborilmadi)", new_count
+                        "(xabar yuborilmadi)", len(new_ad_ids)
                     )
                     first_run = False
 
                 else:
                     # Oddiy tekshiruv: yangilarini topib yuborish
                     new_found = 0
+                    # Deduplicate while preserving order of scraped ads
+                    seen_in_batch = set()
+                    unique_new_ads = []
                     for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
+                        if ad.id in new_ad_ids and ad.id not in seen_in_batch:
+                            seen_in_batch.add(ad.id)
+                            unique_new_ads.append(ad)
+
+                    if unique_new_ads:
+                        save_ads([ad.id for ad in unique_new_ads])
+                        for ad in unique_new_ads:
                             await send_ad_notification(ad)
                             stats["new_ads_found"] += 1
                             new_found += 1
