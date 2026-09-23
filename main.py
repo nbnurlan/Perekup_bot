@@ -1,17 +1,3 @@
-import os
-import threading
-from flask import Flask
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 7860))
-    app.run(host='0.0.0.0', port=port)
-    
 # ================================================================
 #  main.py — Asosiy fayl
 #  Render.com da ishga tushiriladi.
@@ -37,7 +23,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 import config
-from database import cleanup_old_ads, init_db, is_new_ad, save_ad
+from database import cleanup_old_ads, init_db, filter_new_ads, save_ads_batch, save_ad
 from parser import fetch_ads
 
 # ---------------------------------------------------------------
@@ -229,25 +215,30 @@ async def monitoring_loop() -> None:
             else:
                 stats["last_error"] = None
 
+                # Extract all candidate ad IDs from fetched ads
+                ad_ids = [ad.id for ad in ads]
+
+                # ⚡ Batch query database to identify only new ads in a single query
+                new_ad_ids = set(filter_new_ads(ad_ids))
+
                 if first_run:
                     # Birinchi ishga tushishda barcha e'lonlarni "ko'rilgan" deb belgilash
                     # (Restart bo'lganda eski e'lonlar yana yuborilmasligi uchun)
-                    new_count = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
-                            new_count += 1
+                    # ⚡ Batch save all new ads to DB in a single transaction
+                    save_ads_batch(list(new_ad_ids))
                     logger.info(
                         "🏁 Birinchi ishga tushish: %d e'lon bazaga yozildi "
-                        "(xabar yuborilmadi)", new_count
+                        "(xabar yuborilmadi)", len(new_ad_ids)
                     )
                     first_run = False
 
                 else:
                     # Oddiy tekshiruv: yangilarini topib yuborish
                     new_found = 0
+                    processed_ad_ids = set()
                     for ad in ads:
-                        if is_new_ad(ad.id):
+                        if ad.id in new_ad_ids and ad.id not in processed_ad_ids:
+                            processed_ad_ids.add(ad.id)
                             save_ad(ad.id)
                             await send_ad_notification(ad)
                             stats["new_ads_found"] += 1
@@ -301,7 +292,7 @@ async def main() -> None:
 
 
 
-    if __name__ == "__main__":
+if __name__ == "__main__":
     asyncio.run(main())
 
     
