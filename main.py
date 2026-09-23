@@ -37,7 +37,14 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 import config
-from database import cleanup_old_ads, init_db, is_new_ad, save_ad
+from database import (
+    cleanup_old_ads,
+    get_existing_ad_ids,
+    init_db,
+    is_new_ad,
+    save_ad,
+    save_ads,
+)
 from parser import fetch_ads
 
 # ---------------------------------------------------------------
@@ -229,34 +236,36 @@ async def monitoring_loop() -> None:
             else:
                 stats["last_error"] = None
 
+                # OPTIMIZATION (Bolt ⚡): Query DB in a single batch query for all fetched ads
+                # avoids N+1 query and connection overhead per check cycle
+                all_ad_ids = [ad.id for ad in ads]
+                existing_ad_ids = get_existing_ad_ids(all_ad_ids)
+                new_ads = [ad for ad in ads if ad.id not in existing_ad_ids]
+
                 if first_run:
-                    # Birinchi ishga tushishda barcha e'lonlarni "ko'rilgan" deb belgilash
+                    # Birinchi ishga tushishda barcha e'lonlarni batch saqlash
                     # (Restart bo'lganda eski e'lonlar yana yuborilmasligi uchun)
-                    new_count = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
-                            new_count += 1
+                    new_ad_ids = [ad.id for ad in new_ads]
+                    save_ads(new_ad_ids)
                     logger.info(
                         "🏁 Birinchi ishga tushish: %d e'lon bazaga yozildi "
-                        "(xabar yuborilmadi)", new_count
+                        "(xabar yuborilmadi)", len(new_ad_ids)
                     )
                     first_run = False
 
                 else:
-                    # Oddiy tekshiruv: yangilarini topib yuborish
-                    new_found = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
+                    # Oddiy tekshiruv: yangilarini batch saqlash va yuborish
+                    if new_ads:
+                        # OPTIMIZATION (Bolt ⚡): Save all new ad IDs in 1 transaction instead of N
+                        save_ads([ad.id for ad in new_ads])
+
+                        for ad in new_ads:
                             await send_ad_notification(ad)
                             stats["new_ads_found"] += 1
-                            new_found += 1
                             # Ketma-ket xabarlar orasida 1-2 sek kechikish
                             await asyncio.sleep(random.uniform(1, 2))
 
-                    if new_found:
-                        logger.info("✅ %d ta yangi e'lon topildi va yuborildi", new_found)
+                        logger.info("✅ %d ta yangi e'lon topildi va yuborildi", len(new_ads))
                     else:
                         logger.info("😴 Yangi e'lon yo'q")
 
