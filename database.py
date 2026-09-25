@@ -5,6 +5,7 @@
 
 import sqlite3
 import logging
+from typing import List, Set
 from config import DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,26 @@ def is_new_ad(ad_id: str) -> bool:
     return row is None
 
 
+def filter_new_ad_ids(ad_ids: List[str]) -> Set[str]:
+    """
+    Performance Optimization:
+    Checks multiple ad IDs in a single SQL query (O(1) connection overhead instead of O(N)).
+    Returns a set of ad_ids that are new (not yet in seen_ads).
+    """
+    if not ad_ids:
+        return set()
+
+    # Deduplicate candidate IDs for query efficiency
+    unique_ids = list(set(ad_ids))
+    placeholders = ",".join("?" for _ in unique_ids)
+    query = f"SELECT ad_id FROM seen_ads WHERE ad_id IN ({placeholders})"
+
+    with sqlite3.connect(DB_PATH) as conn:
+        seen = {row[0] for row in conn.execute(query, unique_ids).fetchall()}
+
+    return {ad_id for ad_id in ad_ids if ad_id not in seen}
+
+
 def save_ad(ad_id: str) -> None:
     """
     E'lon ID-sini bazaga saqlaydi (ko'rildi deb belgilaydi).
@@ -49,6 +70,23 @@ def save_ad(ad_id: str) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO seen_ads (ad_id) VALUES (?)", (ad_id,)
+        )
+        conn.commit()
+
+
+def save_ads(ad_ids: List[str]) -> None:
+    """
+    Performance Optimization:
+    Inserts multiple ad IDs in a single transaction using executemany.
+    Reduces disk I/O and SQLite transaction lock overhead significantly compared to individual inserts.
+    """
+    if not ad_ids:
+        return
+
+    records = [(ad_id,) for ad_id in ad_ids]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO seen_ads (ad_id) VALUES (?)", records
         )
         conn.commit()
 
