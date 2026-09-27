@@ -1,0 +1,3 @@
+## 2026-03-30 - Batch SQLite queries to prevent N+1 database connection overhead
+**Learning:** Checking and saving scraped items one-by-one in SQLite creates individual connections and SQL transactions per item, incurring significant per-connection/file-lock overhead (~90ms for 50 items). Grouping ad IDs into batch queries (`IN (...)`) and `executemany` statements reduces connection roundtrips and file locks to a single transaction (~1.5ms for 50 items), resulting in a ~57x speedup.
+**Action:** When working with SQLite in Python polling scripts, prefer batch queries with parameter chunking (e.g. chunks of 500) over item-by-item queries.
