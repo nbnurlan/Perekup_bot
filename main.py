@@ -298,10 +298,7 @@ async def main() -> None:
     # aiogram polling — bot komandalari uchun
     logger.info("🤖 Telegram bot polling boshlandi...")
     await dp.start_polling(bot, skip_updates=True)
-
-
-
-    if __name__ == "__main__":
+if __name__ == "__main__":
     asyncio.run(main())
 
     
