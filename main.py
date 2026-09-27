@@ -37,7 +37,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 import config
-from database import cleanup_old_ads, init_db, is_new_ad, save_ad
+from database import cleanup_old_ads, filter_new_ads, init_db, is_new_ad, save_ad, save_ads
 from parser import fetch_ads
 
 # ---------------------------------------------------------------
@@ -229,17 +229,18 @@ async def monitoring_loop() -> None:
             else:
                 stats["last_error"] = None
 
+                # Batch check all fetched ad IDs in a single query
+                ad_ids = [ad.id for ad in ads]
+                new_ad_ids = filter_new_ads(ad_ids)
+
                 if first_run:
                     # Birinchi ishga tushishda barcha e'lonlarni "ko'rilgan" deb belgilash
                     # (Restart bo'lganda eski e'lonlar yana yuborilmasligi uchun)
-                    new_count = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
-                            new_count += 1
+                    # Batch insert all new ad IDs at once to avoid loop connections
+                    save_ads(list(new_ad_ids))
                     logger.info(
                         "🏁 Birinchi ishga tushish: %d e'lon bazaga yozildi "
-                        "(xabar yuborilmadi)", new_count
+                        "(xabar yuborilmadi)", len(new_ad_ids)
                     )
                     first_run = False
 
@@ -247,7 +248,7 @@ async def monitoring_loop() -> None:
                     # Oddiy tekshiruv: yangilarini topib yuborish
                     new_found = 0
                     for ad in ads:
-                        if is_new_ad(ad.id):
+                        if ad.id in new_ad_ids:
                             save_ad(ad.id)
                             await send_ad_notification(ad)
                             stats["new_ads_found"] += 1
