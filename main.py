@@ -37,7 +37,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 import config
-from database import cleanup_old_ads, init_db, is_new_ad, save_ad
+from database import cleanup_old_ads, init_db, is_new_ad, save_ad, filter_new_ad_ids, save_ads
 from parser import fetch_ads
 
 # ---------------------------------------------------------------
@@ -229,25 +229,29 @@ async def monitoring_loop() -> None:
             else:
                 stats["last_error"] = None
 
+                # Performance optimization: batch check seen status for all ads in one query
+                all_ad_ids = [ad.id for ad in ads]
+                new_ad_ids = filter_new_ad_ids(all_ad_ids)
+
                 if first_run:
                     # Birinchi ishga tushishda barcha e'lonlarni "ko'rilgan" deb belgilash
                     # (Restart bo'lganda eski e'lonlar yana yuborilmasligi uchun)
-                    new_count = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
-                            new_count += 1
+                    if new_ad_ids:
+                        save_ads(list(new_ad_ids))
                     logger.info(
                         "🏁 Birinchi ishga tushish: %d e'lon bazaga yozildi "
-                        "(xabar yuborilmadi)", new_count
+                        "(xabar yuborilmadi)", len(new_ad_ids)
                     )
                     first_run = False
 
                 else:
                     # Oddiy tekshiruv: yangilarini topib yuborish
                     new_found = 0
+                    # Preserve order of parsed ads when sending notifications while avoiding duplicate notifications if same ID appears twice
+                    processed_ids = set()
                     for ad in ads:
-                        if is_new_ad(ad.id):
+                        if ad.id in new_ad_ids and ad.id not in processed_ids:
+                            processed_ids.add(ad.id)
                             save_ad(ad.id)
                             await send_ad_notification(ad)
                             stats["new_ads_found"] += 1
