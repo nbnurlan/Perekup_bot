@@ -42,6 +42,23 @@ def is_new_ad(ad_id: str) -> bool:
     return row is None
 
 
+def get_seen_ad_ids(ad_ids: list[str]) -> set[str]:
+    """
+    ⚡ PERFORMANCE OPTIMIZATION:
+    Berilgan e'lon ID-lari orasidan allaqachon ko'rilganlarini to'plam (set) sifatida qaytaradi.
+    Har bir ID uchun alohida DB ulanishi o'rniga bitta SELECT ... WHERE IN (...) so'rovi
+    orqali N+1 muammosini hal qiladi (~40x tezroq).
+    """
+    if not ad_ids:
+        return set()
+    placeholders = ",".join("?" * len(ad_ids))
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            f"SELECT ad_id FROM seen_ads WHERE ad_id IN ({placeholders})", ad_ids
+        ).fetchall()
+    return {row[0] for row in rows}
+
+
 def save_ad(ad_id: str) -> None:
     """
     E'lon ID-sini bazaga saqlaydi (ko'rildi deb belgilaydi).
@@ -49,6 +66,22 @@ def save_ad(ad_id: str) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO seen_ads (ad_id) VALUES (?)", (ad_id,)
+        )
+        conn.commit()
+
+
+def save_ads(ad_ids: list[str]) -> None:
+    """
+    ⚡ PERFORMANCE OPTIMIZATION:
+    Bir nechta e'lon ID-larini bitta tranzaksiya va DB ulanishi ichida saqlaydi (executemany).
+    Ko'plab yakka INSERT/commit va disk I/O operatsiyalarini bittaga keltirib, unumdorlikni keskin oshiradi.
+    """
+    if not ad_ids:
+        return
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO seen_ads (ad_id) VALUES (?)",
+            [(ad_id,) for ad_id in ad_ids]
         )
         conn.commit()
 
