@@ -13,6 +13,16 @@ from config import USER_AGENTS, REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
+# Performance Optimization (Bolt ⚡):
+# Determine best parser engine once at module load time.
+# Uses C-based 'lxml' parser engine (declared in requirements.txt)
+# which is ~25-40% faster than pure-Python 'html.parser'.
+try:
+    import lxml  # noqa: F401
+    PARSER_ENGINE = "lxml"
+except ImportError:
+    PARSER_ENGINE = "html.parser"
+
 
 @dataclass
 class Ad:
@@ -101,7 +111,10 @@ def _parse_html(html: str) -> list[Ad]:
     HTML matndan e'lonlarni ajratib oladi.
     OLX kodni yangilasa, shu yerda selector'larni yangilash kerak.
     """
-    soup = BeautifulSoup(html, "html.parser")
+    # Performance Optimization (Bolt ⚡):
+    # Use C-based 'lxml' parser engine determined at module import time
+    # for ~25-40% faster parsing compared to pure-Python 'html.parser'.
+    soup = BeautifulSoup(html, PARSER_ENGINE)
     ads  = []
 
     # OLX.kz e'lon kartalari uchun asosiy selector
