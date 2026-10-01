@@ -37,7 +37,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 import config
-from database import cleanup_old_ads, init_db, is_new_ad, save_ad
+from database import cleanup_old_ads, get_seen_ads, init_db, is_new_ad, save_ad, save_ads
 from parser import fetch_ads
 
 # ---------------------------------------------------------------
@@ -229,34 +229,34 @@ async def monitoring_loop() -> None:
             else:
                 stats["last_error"] = None
 
+                # Batch query: barcha ko'rilgan e'lon ID-larini bitta so'rovda tekshirish
+                ad_ids = [ad.id for ad in ads]
+                seen_ids = get_seen_ads(ad_ids)
+                new_ads = [ad for ad in ads if ad.id not in seen_ids]
+
                 if first_run:
                     # Birinchi ishga tushishda barcha e'lonlarni "ko'rilgan" deb belgilash
                     # (Restart bo'lganda eski e'lonlar yana yuborilmasligi uchun)
-                    new_count = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
-                            new_count += 1
+                    if new_ads:
+                        save_ads([ad.id for ad in new_ads])
                     logger.info(
                         "🏁 Birinchi ishga tushish: %d e'lon bazaga yozildi "
-                        "(xabar yuborilmadi)", new_count
+                        "(xabar yuborilmadi)", len(new_ads)
                     )
                     first_run = False
 
                 else:
                     # Oddiy tekshiruv: yangilarini topib yuborish
-                    new_found = 0
-                    for ad in ads:
-                        if is_new_ad(ad.id):
-                            save_ad(ad.id)
+                    if new_ads:
+                        # Batch insert: yangi e'lonlarni bitta tranzaksiyada saqlash
+                        save_ads([ad.id for ad in new_ads])
+                        for ad in new_ads:
                             await send_ad_notification(ad)
                             stats["new_ads_found"] += 1
-                            new_found += 1
                             # Ketma-ket xabarlar orasida 1-2 sek kechikish
                             await asyncio.sleep(random.uniform(1, 2))
 
-                    if new_found:
-                        logger.info("✅ %d ta yangi e'lon topildi va yuborildi", new_found)
+                        logger.info("✅ %d ta yangi e'lon topildi va yuborildi", len(new_ads))
                     else:
                         logger.info("😴 Yangi e'lon yo'q")
 
